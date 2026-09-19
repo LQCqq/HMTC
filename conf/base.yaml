@@ -1,0 +1,47 @@
+model:
+  num_elements: 100
+  max_sites: 20
+  hidden_dim: 64
+  num_global_tokens: 4
+  num_blocks: 4
+  num_rbf: 16
+  rbf_cutoff: 8.0
+  tree_specs:
+    - name: chemical
+      kind: chemical
+      leaf_entity: site
+      groups: [8, 4]
+      output_factor: element
+    - name: geometry
+      kind: geometry
+      leaf_entity: site
+      groups: [8, 4]
+      output_factor: coordinate
+
+diffusion:
+  timesteps: 200
+  beta_start: 0.0001
+  beta_end: 0.02
+  coordinate_sigma_max: 0.35
+  categorical_mask_probability_max: 0.95
+  energy_schedule_power: 1.60
+  lattice_schedule_power: 1.15
+  composition_schedule_power: 1.30
+
+loss:
+  energy: 1.0
+  lattice: 1.0
+  composition: 0.5
+  element: 1.0
+  coordinate: 2.0
+  existence: 1.0
+  energy_consistency: 0.25
+  composition_consistency: 0.25
+  routing_balance: 0.01
+  routing_entropy: 0.005
+  tree_redundancy: 0.005
+
+sampling:
+  steps: 200
+  temperature: 1.0
+  energy_clamp: null

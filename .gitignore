@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+build/
+dist/
+
+# Environments
+.venv/
+venv/
+env/
+conda-env/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Test/cache
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# MP-20 and processed datasets
+data/*
+!data/.gitkeep
+*.csv
+*.jsonl
+*.pkl
+*.pickle
+*.npy
+*.npz
+*.pt
+
+# Checkpoints and training outputs
+runs/
+outputs/
+checkpoints/
+logs/
+wandb/
+lightning_logs/
+*.ckpt
+*.pth
+*.tar
+
+# Generated structures
+generated/
+samples/
+relaxed/
+*.cif
+*.xyz
+*.traj
+
+# System
+.DS_Store
+Thumbs.db
