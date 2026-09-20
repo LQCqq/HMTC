@@ -28,7 +28,9 @@ htmlcov/
 data/*
 !data/.gitkeep
 *.csv
-*.jsonl
+*.jsonl/*
+!tests/fixtures/
+!tests/fixtures/tiny.jsonl
 *.pkl
 *.pickle
 *.npy
@@ -45,6 +47,12 @@ lightning_logs/
 *.ckpt
 *.pth
 *.tar
+
+# Local virtual environments
+venvs/
+
+# Local training and evaluation outputs
+hmtc_outputs/
 
 # Generated structures
 generated/

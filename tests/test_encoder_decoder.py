@@ -30,8 +30,8 @@ def test_explicit_three_module_path_has_sample_specific_roots() -> None:
 
 
 def test_arbitrary_lattice_is_canonicalized_without_distance_change() -> None:
-    from hmtf.data import CrystalRecord, NormalizationStats, collate_records
-    from hmtf.models.geometry import lattice_params_to_matrix
+    from hmtc.data import CrystalRecord, NormalizationStats, collate_records
+    from hmtc.models.geometry import lattice_params_to_matrix
 
     matrix = torch.tensor([[2.0, 0.4, 0.1], [0.1, 2.5, 0.3], [0.2, 0.0, 3.0]])
     record = CrystalRecord(

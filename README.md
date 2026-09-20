@@ -129,7 +129,7 @@ Train on the converted split:
 ```bash
 python scripts/train.py \
   --data-dir data/mp_20_hmtf \
-  --config configs/base.yaml \
+  --config conf/base.yaml \
   --output runs/hmtf_mp20.pt \
   --epochs 50 \
   --batch-size 32
@@ -146,7 +146,7 @@ After preprocessing a dataset into the JSONL contract below:
 ```bash
 python scripts/train.py \
   --data data/train.jsonl \
-  --config configs/base.yaml \
+  --config conf/base.yaml \
   --output runs/hmtf_initial.pt \
   --epochs 50
 

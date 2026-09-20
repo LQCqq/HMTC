@@ -1,0 +1,27 @@
+#!/bin/bash
+
+#PBS -N train_test
+
+#PBS -l select=1:ncpus=8:mem=46gb:ngpus=1
+
+#PBS -l walltime=12:00:00
+
+#PBS -M z5561341@ad.unsw.edu.au
+
+#PBS -m ae
+
+#PBS -j oe
+
+#PBS -o /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC/logs/train_test.log
+
+source /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC/venvs/hmtc/bin/activate
+
+cd /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC
+
+python scripts/train.py \
+  --data-dir data/mp_20_hmtc \
+  --config conf/base.yaml \
+  --output hmtc_outputs/hmtc_mp20_e50.ckpt \
+  --epochs 50 \
+  --batch-size 32 \
+  --device cuda

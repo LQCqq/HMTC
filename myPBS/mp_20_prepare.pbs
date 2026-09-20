@@ -1,0 +1,71 @@
+#!/bin/bash
+
+#PBS -N MP_prepare
+
+#PBS -l select=1:ncpus=8:mem=46gb:ngpus=0
+
+#PBS -l walltime=12:00:00
+
+#PBS -M z5561341@ad.unsw.edu.au
+
+#PBS -m ae
+
+#PBS -j oe
+
+#PBS -o /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC/logs/prepare_mp20.log
+
+set -euo pipefail
+
+PROJECT_DIR="/srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC"
+VENV_DIR="${PROJECT_DIR}/venvs/hmtc"
+
+echo "===== HMTC MP-20 preparation ====="
+echo "Start time: $(date)"
+echo "Host: $(hostname)"
+echo "PBS job ID: ${PBS_JOBID:-unknown}"
+
+module purge
+module load python/3.10.8
+
+source "${VENV_DIR}/bin/activate"
+
+cd "${PROJECT_DIR}"
+
+echo "Python: $(which python)"
+python --version
+
+python - <<'PY'
+import importlib.metadata
+import hmtc
+import numpy
+import pymatgen
+import torch
+
+print("HMTC:", hmtc.__version__)
+print("PyTorch:", torch.__version__)
+print("NumPy:", numpy.__version__)
+print("Pymatgen:", importlib.metadata.version("pymatgen"))
+PY
+
+test -f data/mp_20/train.csv
+test -f data/mp_20/val.csv
+test -f data/mp_20/test.csv
+
+mkdir -p data/mp_20_hmtc
+
+echo "Starting MP-20 conversion..."
+
+python -u scripts/prepare_mp20.py \
+  --input-dir data/mp_20 \
+  --output-dir data/mp_20_hmtc \
+  --max-sites 20 \
+  --num-elements 100
+
+echo "===== Conversion report ====="
+cat data/mp_20_hmtc/conversion_report.json
+
+echo "===== JSONL record counts ====="
+wc -l data/mp_20_hmtc/*.jsonl
+
+echo "Finish time: $(date)"
+echo "MP-20 preparation completed successfully."
