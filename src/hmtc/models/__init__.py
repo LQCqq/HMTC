@@ -1,5 +1,5 @@
 from .encoder_decoder import CrossTreeLatentCore, MultiTreeDecoder, MultiTreeEncoder
-from .hmtc import HMTFModel, HMTFOutput
+from .hmtf import HMTFModel, HMTFOutput
 
 __all__ = [
     "CrossTreeLatentCore",
