@@ -27,6 +27,13 @@ def test_explicit_three_module_path_has_sample_specific_roots() -> None:
     chemical_roots = output.traces[0].roots["chemical"]
     assert chemical_roots.shape == (2, config.hidden_dim + 1)
     assert not torch.allclose(chemical_roots[0], chemical_roots[1])
+    assert model.encoder.factor_indices["chemical"] == (0, 2, 3)
+    assert model.encoder.factor_indices["geometry"] == (0, 1, 3)
+    expected_mass = state.existence.sum(dim=1)
+    chemical_mass = output.traces[0].masses["chemical"][0].sum(dim=1)
+    geometry_mass = output.traces[0].masses["geometry"][0].sum(dim=1)
+    assert torch.allclose(chemical_mass, expected_mass, atol=1.0e-5)
+    assert torch.allclose(geometry_mass, expected_mass, atol=1.0e-5)
 
 
 def test_arbitrary_lattice_is_canonicalized_without_distance_change() -> None:

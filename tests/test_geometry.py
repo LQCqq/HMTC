@@ -1,5 +1,6 @@
 import torch
 
+from hmtc.losses import minimum_distance_penalty
 from hmtc.models.geometry import (
     lattice_matrix_to_params,
     lattice_params_to_matrix,
@@ -25,3 +26,31 @@ def test_minimum_image_and_pairwise_symmetry() -> None:
     params = torch.zeros(2, 6)
     _, distances = pairwise_periodic_geometry(coords, params)
     assert torch.allclose(distances, distances.transpose(1, 2), atol=1.0e-6)
+
+
+def test_minimum_distance_penalty_and_joint_gradients() -> None:
+    logits = torch.zeros(1, 2, 100, requires_grad=True)
+    close_coords = torch.tensor(
+        [[[0.0, 0.0, 0.0], [0.05, 0.0, 0.0]]], requires_grad=True
+    )
+    lattice = torch.tensor(
+        [[1.3862944, 0.0, 1.3862944, 0.0, 0.0, 1.3862944]],
+        requires_grad=True,
+    )
+    active = torch.tensor([[True, True]])
+    penalty = minimum_distance_penalty(logits, close_coords, lattice, active)
+    assert penalty > 0
+    penalty.backward()
+    assert logits.grad is not None and logits.grad.abs().sum() > 0
+    assert close_coords.grad is not None and close_coords.grad.abs().sum() > 0
+    assert lattice.grad is not None and lattice.grad.abs().sum() > 0
+
+
+def test_minimum_distance_penalty_is_zero_for_separated_pair() -> None:
+    logits = torch.full((1, 2, 100), -20.0)
+    logits[..., 0] = 20.0
+    separated_coords = torch.tensor([[[0.0, 0.0, 0.0], [0.25, 0.0, 0.0]]])
+    lattice = torch.tensor([[1.3862944, 0.0, 1.3862944, 0.0, 0.0, 1.3862944]])
+    active = torch.tensor([[True, True]])
+    penalty = minimum_distance_penalty(logits, separated_coords, lattice, active)
+    assert torch.allclose(penalty, torch.zeros_like(penalty), atol=1.0e-7)

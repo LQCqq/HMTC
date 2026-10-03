@@ -31,15 +31,20 @@ diffusion:
 loss:
   energy: 1.0
   lattice: 1.0
+  distance: 1.0
   composition: 0.5
   element: 1.0
+  element_count: 0.5
   coordinate: 2.0
   existence: 1.0
   energy_consistency: 0.25
   composition_consistency: 0.25
-  routing_balance: 0.01
+  routing_balance: 0.05
   routing_entropy: 0.005
-  tree_redundancy: 0.005
+  tree_redundancy: 0.10
+  min_distance_offset: 0.7
+  min_distance_scaling_factor: 0.5
+  tree_redundancy_margin: 0.7
 
 sampling:
   steps: 200

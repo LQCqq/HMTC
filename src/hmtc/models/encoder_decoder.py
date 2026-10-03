@@ -54,6 +54,22 @@ class MultiTreeEncoder(nn.Module):
         )
         if not self.trees:
             raise ValueError("MultiTreeEncoder requires at least one site-backed tree")
+        self.tree_kinds = {
+            spec.name: spec.kind for spec in config.tree_specs if spec.leaf_entity == "site"
+        }
+        # Factor order is fixed by HMTFModel.factor_names:
+        # energy=0, lattice=1, composition=2, size=3.  Both trees retain the
+        # shared workspace and energy/size information, while their private
+        # context exposes the factor most relevant to that branch.
+        self.factor_indices = {
+            "chemical": (0, 2, 3),
+            "geometry": (0, 1, 3),
+        }
+
+    def _tree_context(self, name: str, workspace: Tensor, factors: Tensor) -> Tensor:
+        indices = self.factor_indices.get(self.tree_kinds[name])
+        selected_factors = factors if indices is None else factors[:, indices]
+        return torch.cat((workspace, selected_factors), dim=1)
 
     def forward(
         self,
@@ -67,7 +83,6 @@ class MultiTreeEncoder(nn.Module):
         active_trees: set[str] | None = None,
     ) -> EncodedTrees:
         sites = self.physical(sites, frac_coords, lattice_params, existence, site_mask)
-        context = torch.cat((workspace, factors), dim=1)
         selected = {
             name: tree
             for name, tree in self.trees.items()
@@ -75,7 +90,18 @@ class MultiTreeEncoder(nn.Module):
         }
         if not selected:
             raise ValueError("active_trees disabled every registered site tree")
-        passes = {name: tree.upward(sites, site_mask, context) for name, tree in selected.items()}
+        # Use noisy existence as a soft leaf mass. This prevents empty/padded
+        # candidate slots from dominating the hierarchy while still allowing
+        # them to receive downward messages and become active during denoising.
+        leaf_mass = site_mask.to(existence.dtype) * existence.clamp(0.0, 1.0)
+        passes = {
+            name: tree.upward(
+                sites,
+                leaf_mass,
+                self._tree_context(name, workspace, factors),
+            )
+            for name, tree in selected.items()
+        }
         return EncodedTrees(
             sites=sites,
             passes=passes,

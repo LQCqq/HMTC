@@ -72,15 +72,28 @@ class DiffusionConfig:
 class LossConfig:
     energy: float = 1.0
     lattice: float = 1.0
+    distance: float = 1.0
     composition: float = 0.5
     element: float = 1.0
+    element_count: float = 0.5
     coordinate: float = 2.0
     existence: float = 1.0
     energy_consistency: float = 0.25
     composition_consistency: float = 0.25
-    routing_balance: float = 0.01
+    routing_balance: float = 0.05
     routing_entropy: float = 0.005
-    tree_redundancy: float = 0.005
+    tree_redundancy: float = 0.10
+    min_distance_offset: float = 0.7
+    min_distance_scaling_factor: float = 0.5
+    tree_redundancy_margin: float = 0.7
+
+    def __post_init__(self) -> None:
+        if self.min_distance_offset < 0.0:
+            raise ValueError("min_distance_offset must be non-negative")
+        if self.min_distance_scaling_factor <= 0.0:
+            raise ValueError("min_distance_scaling_factor must be positive")
+        if not 0.0 <= self.tree_redundancy_margin < 1.0:
+            raise ValueError("tree_redundancy_margin must lie in [0, 1)")
 
 
 def _tree_spec(raw: dict[str, Any]) -> TreeSpec:

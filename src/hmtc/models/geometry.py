@@ -74,7 +74,19 @@ def pairwise_periodic_geometry(
     best = squared_distances.argmin(dim=-1)
     gather_index = best[..., None, None].expand(*best.shape, 1, 3)
     displacement = cartesian_candidates.gather(-2, gather_index).squeeze(-2)
-    distances = squared_distances.gather(-1, best.unsqueeze(-1)).squeeze(-1).sqrt()
+    best_squared_distances = squared_distances.gather(
+        -1, best.unsqueeze(-1)
+    ).squeeze(-1)
+    # Self-pairs have exactly zero distance. A direct sqrt(0) has an infinite
+    # derivative and can produce 0 * inf = NaN even when those pairs are masked
+    # later. Clamp before sqrt, then restore exact zeros with a zero-gradient
+    # branch so all downstream periodic-distance losses remain finite.
+    distances = best_squared_distances.clamp_min(1.0e-12).sqrt()
+    distances = torch.where(
+        best_squared_distances > 0.0,
+        distances,
+        torch.zeros_like(distances),
+    )
     return displacement, distances
 
 

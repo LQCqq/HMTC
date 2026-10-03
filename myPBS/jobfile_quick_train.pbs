@@ -12,7 +12,7 @@
 
 #PBS -j oe
 
-#PBS -o /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC/logs/train_test.log
+#PBS -o /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC/logs
 
 source /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC/venvs/hmtc/bin/activate
 
@@ -21,7 +21,7 @@ cd /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC
 python scripts/train.py \
   --data-dir data/mp_20_hmtc \
   --config conf/base.yaml \
-  --output hmtc_outputs/hmtc_mp20_e50.ckpt \
-  --epochs 50 \
-  --batch-size 32 \
+  --output hmtc_outputs/hmtc_mp20_e300_v3_elem.ckpt \
+  --epochs 300 \
+  --batch-size 256 \
   --device cuda

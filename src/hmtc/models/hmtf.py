@@ -89,6 +89,12 @@ class HMTFModel(nn.Module):
         self.energy_head = self._head(hidden * 2, 1)
         self.lattice_head = self._head(hidden * 2, 6)
         self.composition_head = self._head(hidden * 2, config.num_elements)
+        self.element_condition = nn.Sequential(
+            nn.LayerNorm(hidden * 2),
+            nn.Linear(hidden * 2, hidden),
+            nn.SiLU(),
+            nn.Linear(hidden, hidden),
+        )
         self.element_head = self._head(hidden * 2, config.num_elements)
         self.coordinate_head = self._head(hidden * 2, 3)
         self.existence_head = self._head(hidden * 2, 1)
@@ -171,7 +177,17 @@ class HMTFModel(nn.Module):
 
         energy = state.energy + self.energy_head(energy_context)
         lattice = state.lattice + self.lattice_head(lattice_context)
-        element_logits = self.element_head(site_readout)
+        chemical_root = latent.roots.get("chemical")
+        chemical_tangent = (
+            global_tangent if chemical_root is None else logmap0(chemical_root)
+        )
+        element_condition = self.element_condition(
+            torch.cat((factor_tangent[:, 2], chemical_tangent), dim=-1)
+        )
+        element_site_readout = torch.cat(
+            (site_tangent + element_condition[:, None, :], global_for_sites), dim=-1
+        )
+        element_logits = self.element_head(element_site_readout)
         coordinate_delta = 0.5 * torch.tanh(self.coordinate_head(site_readout))
         frac_coords = torch.remainder(state.frac_coords + coordinate_delta, 1.0)
         existence_logits = self.existence_head(site_readout).squeeze(-1)

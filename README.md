@@ -135,6 +135,30 @@ python scripts/train.py \
   --batch-size 32
 ```
 
+The epoch line contains only the total training loss. At the end of training,
+the script prints raw values, weights, and weighted values for every component,
+including the differentiable minimum-distance penalty. For each active unique
+periodic pair, the threshold is
+
+```text
+d_min(i, j) = (0.7 + radius(i) + radius(j)) * 0.5
+```
+
+and the penalty is the mean squared positive violation
+`relu(d_min - d_actual)^2`. Expected covalent radii are computed from soft
+element probabilities, so the term provides gradients to elements, coordinates,
+and lattice parameters. The offset, scaling factor, and loss weight are set in
+`conf/base.yaml`.
+
+The chemical and geometry hierarchies use deliberately different factor
+contexts before their roots communicate. The chemical tree receives energy,
+composition, and size tokens; the geometry tree receives energy, lattice, and
+size tokens. Both retain the shared periodic physical stem, so specialization
+does not remove chemistry-geometry coupling. Noisy existence is used as soft
+leaf mass, preventing empty candidate slots from dominating a hierarchy.
+Routing regularization combines balanced group use, low per-site entropy, and
+multi-level co-assignment decorrelation between trees.
+
 The current CLI uses the training split and stores its energy normalization in
 the checkpoint. Validation metrics and early stopping should be added before a
 long production run.

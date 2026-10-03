@@ -1,0 +1,28 @@
+#!/bin/bash
+
+#PBS -N train_test
+
+#PBS -l select=1:ncpus=8:mem=46gb:ngpus=1
+
+#PBS -l walltime=12:00:00
+
+#PBS -M z5561341@ad.unsw.edu.au
+
+#PBS -m ae
+
+#PBS -j oe
+
+#PBS -o /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC/logs/train_test.log
+
+cd /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC
+
+source /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC/venvs/hmtc/bin/activate
+
+python scripts/diagnose_routing.py \
+  --checkpoint hmtc_outputs/hmtc_mp20_e300_v3_elem.ckpt \
+  --data-dir data/mp_20_hmtc \
+  --split val \
+  --batch-size 64 \
+  --times 0.1 0.5 0.9 \
+  --output hmtc_outputs/hmtc_mp20_e300_v3_elem_routing.json \
+  --device cuda

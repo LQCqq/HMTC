@@ -1,0 +1,24 @@
+#!/bin/bash
+
+#PBS -N Generating_test
+
+#PBS -l select=1:ncpus=8:mem=46gb:ngpus=0
+
+#PBS -l walltime=12:00:00
+
+#PBS -M z5561341@ad.unsw.edu.au
+
+#PBS -m ae
+
+#PBS -j oe
+
+#PBS -o /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC/logs
+
+cd /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC
+
+source /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC/venvs/hmtc/bin/activate
+
+python scripts/check_smact.py \
+  --cifs hmtc_outputs/hmtc_mp20_v3_cifs \
+  --output hmtc_outputs/hmtc_mp20_v3_smact.jsonl \
+  --oxidation-states-set smact14

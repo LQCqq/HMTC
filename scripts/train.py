@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict
+from itertools import combinations
 from pathlib import Path
 
 import torch
@@ -59,14 +60,105 @@ def main() -> None:
     model = HMTFModel(model_config).to(args.device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=1.0e-4)
     trainer = HMTFTrainer(model, optimizer, diffusion_config, loss_config)
+    final_train_loss = 0.0
+    final_train_terms: dict[str, float] = {}
+    final_weighted_train_terms: dict[str, float] = {}
+    final_train_diagnostics: dict[str, float | list[float]] = {}
+
     for epoch in range(1, args.epochs + 1):
-        running = 0.0
+        running = torch.zeros((), device=args.device)
+        term_sums: dict[str, torch.Tensor] = {}
+        diagnostic_sums: dict[str, torch.Tensor] = {}
+        diagnostic_samples = 0
         count = 0
+        collect_diagnostics = epoch == args.epochs
+
         for state in loader:
-            result = trainer.train_step(state.to(args.device))
-            running += float(result.loss)
+            state = state.to(args.device)
+            result = trainer.train_step(
+                state,
+                collect_diagnostics=collect_diagnostics,
+            )
+            running += result.loss
+            for name, value in result.terms.items():
+                if name not in term_sums:
+                    term_sums[name] = torch.zeros_like(value)
+                term_sums[name] += value
+            if collect_diagnostics:
+                batch_size = state.batch_size
+                for name, value in result.diagnostics.items():
+                    if name not in diagnostic_sums:
+                        diagnostic_sums[name] = torch.zeros_like(value)
+                    diagnostic_sums[name] += value * batch_size
+                diagnostic_samples += batch_size
             count += 1
-        print(f"epoch={epoch:04d} loss={running / max(count, 1):.6f}")
+
+        denominator = max(count, 1)
+        epoch_loss = float((running / denominator).cpu())
+        epoch_terms = {
+            name: float((value / denominator).cpu()) for name, value in term_sums.items()
+        }
+        weighted_epoch_terms = {
+            name: value * getattr(loss_config, name) for name, value in epoch_terms.items()
+        }
+        print(f"epoch={epoch:04d} loss={epoch_loss:.6f}", flush=True)
+
+        if epoch == args.epochs:
+            final_train_loss = epoch_loss
+            final_train_terms = epoch_terms
+            final_weighted_train_terms = weighted_epoch_terms
+            diagnostic_denominator = max(diagnostic_samples, 1)
+            for name, value in diagnostic_sums.items():
+                averaged = (value / diagnostic_denominator).cpu()
+                if averaged.numel() == 1:
+                    final_train_diagnostics[name] = float(averaged)
+                else:
+                    final_train_diagnostics[name] = averaged.tolist()
+
+    print("=" * 72)
+    print("Final training loss breakdown")
+    print("=" * 72)
+    print(f"{'term':<28} {'raw':>12} {'weight':>10} {'weighted':>12}")
+    for name, value in final_train_terms.items():
+        weight = getattr(loss_config, name)
+        weighted = final_weighted_train_terms[name]
+        print(f"{name:<28} {value:>12.6f} {weight:>10.6f} {weighted:>12.6f}")
+    print("-" * 72)
+    weighted_sum = sum(final_weighted_train_terms.values())
+    print(f"{'weighted_sum':<28} {'':>12} {'':>10} {weighted_sum:>12.6f}")
+    print(f"{'total':<28} {final_train_loss:>12.6f}", flush=True)
+
+    print("=" * 72)
+    print("Final routing diagnostics")
+    print("=" * 72)
+    tree_names = [spec.name for spec in model_config.tree_specs]
+    for spec in model_config.tree_specs:
+        for level_index in range(1, len(spec.groups) + 1):
+            prefix = f"routing.{spec.name}.level{level_index}"
+            occupancy = final_train_diagnostics.get(f"{prefix}.occupancy", [])
+            entropy = final_train_diagnostics.get(f"{prefix}.entropy", float("nan"))
+            occupancy_text = ", ".join(f"{value:.4f}" for value in occupancy)
+            print(
+                f"{spec.name:<10} level={level_index} "
+                f"entropy={entropy:.6f} occupancy=[{occupancy_text}]"
+            )
+    for left_name, right_name in combinations(tree_names, 2):
+        left_spec = next(spec for spec in model_config.tree_specs if spec.name == left_name)
+        right_spec = next(spec for spec in model_config.tree_specs if spec.name == right_name)
+        for level_index in range(
+            1, min(len(left_spec.groups), len(right_spec.groups)) + 1
+        ):
+            key = f"routing_similarity.{left_name}__{right_name}.level{level_index}"
+            if key in final_train_diagnostics:
+                print(
+                    f"offdiag_similarity {left_name}<->{right_name} level={level_index} "
+                    f"value={final_train_diagnostics[key]:.6f}"
+                )
+    fusion_text = " ".join(
+        f"{name}={final_train_diagnostics.get(f'fusion.{name}', float('nan')):.6f}"
+        for name in tree_names
+    )
+    print(f"fusion {fusion_text}", flush=True)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
@@ -79,6 +171,10 @@ def main() -> None:
             "model_state": model.state_dict(),
             "optimizer_state": optimizer.state_dict(),
             "epochs": args.epochs,
+            "final_train_loss": final_train_loss,
+            "final_train_terms": final_train_terms,
+            "final_weighted_train_terms": final_weighted_train_terms,
+            "final_train_diagnostics": final_train_diagnostics,
         },
         args.output,
     )
