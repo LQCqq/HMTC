@@ -16,6 +16,16 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=8.0"]
 mp20 = ["pymatgen>=2024.1"]
+evaluation = [
+  "ase>=3.23",
+  "pymatgen>=2024.1",
+  "smact>=3.2.0",
+]
+mace = [
+  "ase>=3.23",
+  "mace-torch>=0.3.13",
+  "pymatgen>=2024.1",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

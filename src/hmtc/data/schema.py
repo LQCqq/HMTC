@@ -15,12 +15,26 @@ from hmtc.types import CrystalState
 class NormalizationStats:
     energy_mean: float
     energy_std: float
+    lattice_mean: tuple[float, ...] = (0.0,) * 6
+    lattice_std: tuple[float, ...] = (1.0,) * 6
+
+    def __post_init__(self) -> None:
+        if len(self.lattice_mean) != 6 or len(self.lattice_std) != 6:
+            raise ValueError("lattice normalization requires six means and standard deviations")
+        if any(value <= 0 for value in self.lattice_std):
+            raise ValueError("lattice standard deviations must be positive")
 
     def normalize_energy(self, energy: Tensor) -> Tensor:
         return (energy - self.energy_mean) / max(self.energy_std, 1.0e-8)
 
     def denormalize_energy(self, normalized: Tensor) -> Tensor:
         return normalized * self.energy_std + self.energy_mean
+
+    def normalize_lattice(self, lattice: Tensor) -> Tensor:
+        return (lattice - lattice.new_tensor(self.lattice_mean)) / lattice.new_tensor(self.lattice_std)
+
+    def denormalize_lattice(self, normalized: Tensor) -> Tensor:
+        return normalized * normalized.new_tensor(self.lattice_std) + normalized.new_tensor(self.lattice_mean)
 
 
 @dataclass
@@ -82,7 +96,7 @@ def collate_records(
     elements = torch.zeros(batch, max_sites, device=device, dtype=torch.long)
     frac_coords = torch.zeros(batch, max_sites, 3, device=device, dtype=dtype)
     existence = torch.zeros(batch, max_sites, device=device, dtype=dtype)
-    site_mask = torch.ones(batch, max_sites, device=device, dtype=torch.bool)
+    site_mask = torch.zeros(batch, max_sites, device=device, dtype=torch.bool)
     composition = torch.zeros(batch, num_elements, device=device, dtype=dtype)
     for batch_index, record in enumerate(records):
         count = int(record.atomic_numbers.numel())
@@ -90,6 +104,7 @@ def collate_records(
         elements[batch_index, :count] = indices
         frac_coords[batch_index, :count] = torch.remainder(record.frac_coords, 1.0)
         existence[batch_index, :count] = 1.0
+        site_mask[batch_index, :count] = True
         composition[batch_index].scatter_add_(0, indices, torch.ones_like(indices, dtype=dtype))
     composition = composition / max_sites
     return CrystalState(
@@ -128,5 +143,5 @@ def synthetic_batch(
         elements=elements,
         frac_coords=torch.rand(batch_size, max_sites, 3, device=device),
         existence=existence,
-        site_mask=torch.ones(batch_size, max_sites, device=device, dtype=torch.bool),
+        site_mask=existence.bool(),
     )

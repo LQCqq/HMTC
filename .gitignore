@@ -28,7 +28,7 @@ htmlcov/
 data/*
 !data/.gitkeep
 *.csv
-*.jsonl/*
+*.jsonl
 !tests/fixtures/
 !tests/fixtures/tiny.jsonl
 *.pkl
@@ -47,6 +47,8 @@ lightning_logs/
 *.ckpt
 *.pth
 *.tar
+*.tar.gz
+*.zip
 
 # Local virtual environments
 venvs/
@@ -65,3 +67,9 @@ relaxed/
 # System
 .DS_Store
 Thumbs.db
+
+# PBS job output
+*.OU
+*.ER
+*.o[0-9]*
+*.e[0-9]*

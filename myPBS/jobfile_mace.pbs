@@ -1,0 +1,28 @@
+#!/bin/bash
+
+#PBS -N MACE
+
+#PBS -l select=1:ncpus=8:mem=46gb:ngpus=1
+
+#PBS -l walltime=12:00:00
+
+#PBS -M z5561341@ad.unsw.edu.au
+
+#PBS -m ae
+
+#PBS -j oe
+
+#PBS -o /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC/logs
+
+cd /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC
+
+source /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC/venvs/hmtc/bin/activate
+
+python scripts/relax_mace.py \
+  --cifs hmtc_outputs/smact_structure \
+  --output-dir hmtc_outputs/mace_structure \
+  --model medium-mpa-0 \
+  --device cuda \
+  --default-dtype float32 \
+  --fmax 0.02 \
+  --steps 50

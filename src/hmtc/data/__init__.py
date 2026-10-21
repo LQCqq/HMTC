@@ -1,4 +1,4 @@
-from .jsonl import JsonlCrystalDataset, compute_energy_stats
+from .jsonl import JsonlCrystalDataset, compute_count_prior, compute_energy_stats, compute_normalization_stats
 from .mp20 import ConversionReport, convert_mp20_csv, discover_mp20_splits
 from .schema import CrystalRecord, NormalizationStats, collate_records, synthetic_batch
 
@@ -9,6 +9,8 @@ __all__ = [
     "NormalizationStats",
     "collate_records",
     "compute_energy_stats",
+    "compute_count_prior",
+    "compute_normalization_stats",
     "convert_mp20_csv",
     "discover_mp20_splits",
     "synthetic_batch",

@@ -1,0 +1,45 @@
+#!/bin/bash
+
+#PBS -N MatterSim_benchmark
+
+#PBS -l select=1:ncpus=8:mem=46gb:ngpus=1
+
+#PBS -l walltime=12:00:00
+
+#PBS -M z5561341@ad.unsw.edu.au
+
+#PBS -m ae
+
+#PBS -j oe
+
+#PBS -o /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC/logs
+
+#PBS -V
+
+set -e
+
+task_root=/srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC
+
+mkdir -p "$task_root/logs"
+exec > "$task_root/logs/mattersim_debug_${PBS_JOBID}.log" 2>&1
+
+set -x
+
+cd "$task_root"
+source venvs/mattersim/bin/activate
+
+export HF_HOME=/srv/scratch/ml4matdis/Quanli_Project/.cache/huggingface
+mkdir -p "$HF_HOME"
+
+python -u -c "import sys, torch; print(sys.executable); print('Torch:', torch.__version__); print('CUDA:', torch.cuda.is_available())"
+
+python -u -X faulthandler scripts/benchmark_mattersim_version2.py \
+  --cifs hmtc_outputs/mace_structure \
+  --output-dir "hmtc_outputs/mattersim_debug_structure_${PBS_JOBID}" \
+  --model MatterSim-v1.0.0-5M.pth \
+  --device cuda \
+  --fmax 0.02 \
+  --steps 500 \
+  --max-structures 2500 \
+  --energy-correction-scheme MP2020 \
+  --stability-threshold 0.1

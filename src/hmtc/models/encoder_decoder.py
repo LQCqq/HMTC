@@ -10,7 +10,7 @@ from torch import Tensor, nn
 from hmtc.config import HMTFConfig
 from hmtc.manifolds.lorentz import expmap0, logmap0
 from hmtc.models.attention import HyperbolicAttention
-from hmtc.models.geometry import PeriodicMessageLayer
+from hmtc.models.geometry import PeriodicGraph, PeriodicMessageLayer, periodic_radius_graph
 from hmtc.plugins import build_tree_plugin
 from hmtc.plugins.base import TreePass
 
@@ -20,6 +20,7 @@ class EncodedTrees:
     sites: Tensor
     passes: dict[str, TreePass]
     roots: dict[str, Tensor]
+    graph: PeriodicGraph
 
 
 @dataclass
@@ -42,9 +43,12 @@ class MultiTreeEncoder(nn.Module):
 
     def __init__(self, config: HMTFConfig) -> None:
         super().__init__()
-        self.physical = PeriodicMessageLayer(
-            config.hidden_dim, config.num_rbf, config.rbf_cutoff
-        )
+        self.physical = nn.ModuleList([
+            PeriodicMessageLayer(config.hidden_dim, config.num_rbf, config.rbf_cutoff)
+            for _ in range(config.geometry_layers)
+        ])
+        self.cutoff = config.rbf_cutoff
+        self.image_limit = config.periodic_image_limit
         self.trees = nn.ModuleDict(
             {
                 spec.name: build_tree_plugin(spec, config.hidden_dim)
@@ -82,7 +86,11 @@ class MultiTreeEncoder(nn.Module):
         site_mask: Tensor,
         active_trees: set[str] | None = None,
     ) -> EncodedTrees:
-        sites = self.physical(sites, frac_coords, lattice_params, existence, site_mask)
+        active = site_mask & existence.bool()
+        graph = periodic_radius_graph(frac_coords, lattice_params, active,
+                                      self.cutoff, self.image_limit)
+        for layer in self.physical:
+            sites = layer(sites, frac_coords, lattice_params, existence, active, graph)
         selected = {
             name: tree
             for name, tree in self.trees.items()
@@ -90,10 +98,8 @@ class MultiTreeEncoder(nn.Module):
         }
         if not selected:
             raise ValueError("active_trees disabled every registered site tree")
-        # Use noisy existence as a soft leaf mass. This prevents empty/padded
-        # candidate slots from dominating the hierarchy while still allowing
-        # them to receive downward messages and become active during denoising.
-        leaf_mass = site_mask.to(existence.dtype) * existence.clamp(0.0, 1.0)
+        # Count conditioning fixes the physical leaf mass throughout diffusion.
+        leaf_mass = active.to(existence.dtype)
         passes = {
             name: tree.upward(
                 sites,
@@ -106,6 +112,7 @@ class MultiTreeEncoder(nn.Module):
             sites=sites,
             passes=passes,
             roots={name: tree_pass.root for name, tree_pass in passes.items()},
+            graph=graph,
         )
 
 

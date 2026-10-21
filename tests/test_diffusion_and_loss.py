@@ -42,6 +42,7 @@ def test_joint_noise_and_training_loss() -> None:
         clean,
         LossConfig(),
         element_mask=record.element_mask,
+        coordinate_target=record.coordinate_score,
     )
     assert torch.isfinite(total)
     assert "distance" in terms
@@ -51,6 +52,8 @@ def test_joint_noise_and_training_loss() -> None:
     assert terms["routing_entropy"] >= 0
     total.backward()
     assert any(parameter.grad is not None for parameter in model.parameters())
+    assert all(torch.isfinite(parameter.grad).all()
+               for parameter in model.parameters() if parameter.grad is not None)
 
 
 def test_element_denoising_loss_ignores_unmasked_sites() -> None:

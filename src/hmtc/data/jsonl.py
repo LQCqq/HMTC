@@ -9,6 +9,7 @@ import torch
 from torch.utils.data import Dataset
 
 from hmtc.data.schema import CrystalRecord, NormalizationStats
+from hmtc.models.geometry import lattice_matrix_to_params
 
 
 class JsonlCrystalDataset(Dataset[CrystalRecord]):
@@ -57,3 +58,26 @@ def compute_energy_stats(dataset: Dataset[CrystalRecord]) -> NormalizationStats:
         energy_mean=float(energies.mean()),
         energy_std=float(energies.std(unbiased=False).clamp_min(1.0e-8)),
     )
+
+
+def compute_normalization_stats(dataset: Dataset[CrystalRecord]) -> NormalizationStats:
+    """Fit energy and physical lattice scales using the training split only."""
+    energies = compute_energy_stats(dataset)
+    matrices = torch.stack([dataset[index].lattice_matrix.double() for index in range(len(dataset))])
+    canonical = torch.linalg.cholesky(matrices @ matrices.transpose(-1, -2))
+    lattice = lattice_matrix_to_params(canonical)
+    return NormalizationStats(
+        energy_mean=energies.energy_mean,
+        energy_std=energies.energy_std,
+        lattice_mean=tuple(lattice.mean(dim=0).tolist()),
+        lattice_std=tuple(lattice.std(dim=0, unbiased=False).clamp_min(1.0e-3).tolist()),
+    )
+
+
+def compute_count_prior(dataset: Dataset[CrystalRecord], max_sites: int) -> Tensor:
+    """Categorical probabilities for N=1..max_sites, fitted without val/test."""
+    counts = torch.tensor([dataset[index].atomic_numbers.numel() for index in range(len(dataset))])
+    if bool(((counts < 1) | (counts > max_sites)).any()):
+        raise ValueError("training counts exceed the configured max_sites")
+    histogram = torch.bincount(counts, minlength=max_sites + 1)[1:].float()
+    return histogram / histogram.sum()

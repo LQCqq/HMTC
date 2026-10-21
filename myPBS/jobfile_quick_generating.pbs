@@ -19,9 +19,8 @@ cd /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC
 source /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC/venvs/hmtc/bin/activate
 
 python scripts/sample.py \
-  --checkpoint hmtc_outputs/hmtc_mp20_e300_v3_elem.ckpt \
-  --output hmtc_outputs/hmtc_mp20_v3_samples.jsonl \
-  --cif-dir hmtc_outputs/hmtc_mp20_v3_cifs \
+  --checkpoint hmtc_outputs/hmtc_mp20_e300_v4.ckpt \
+  --cif-dir hmtc_outputs/hmtc_mp20_v4_cifs \
   --num-samples 2500 \
   --batch-size 256 \
   --steps 200 \

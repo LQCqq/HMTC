@@ -5,7 +5,10 @@ model:
   num_global_tokens: 4
   num_blocks: 4
   num_rbf: 16
-  rbf_cutoff: 8.0
+  rbf_cutoff: 6.0
+  geometry_layers: 3
+  geometry_refinement_layers: 1
+  periodic_image_limit: 3
   tree_specs:
     - name: chemical
       kind: chemical
@@ -22,8 +25,9 @@ diffusion:
   timesteps: 200
   beta_start: 0.0001
   beta_end: 0.02
-  coordinate_sigma_max: 0.35
-  categorical_mask_probability_max: 0.95
+  coordinate_sigma_min: 0.01
+  coordinate_sigma_max: 1.0
+  categorical_mask_probability_max: 1.0
   energy_schedule_power: 1.60
   lattice_schedule_power: 1.15
   composition_schedule_power: 1.30
@@ -36,7 +40,7 @@ loss:
   element: 1.0
   element_count: 0.5
   coordinate: 2.0
-  existence: 1.0
+  existence: 0.0
   energy_consistency: 0.25
   composition_consistency: 0.25
   routing_balance: 0.05
@@ -45,6 +49,7 @@ loss:
   min_distance_offset: 0.7
   min_distance_scaling_factor: 0.5
   tree_redundancy_margin: 0.7
+  geometry_loss_max_time: 0.5
 
 sampling:
   steps: 200

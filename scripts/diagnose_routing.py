@@ -12,6 +12,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from hmtc.config import DiffusionConfig, HMTFConfig, TreeSpec
+from hmtc.checkpoint import validate_checkpoint
 from hmtc.data import JsonlCrystalDataset, NormalizationStats, collate_records
 from hmtc.diagnostics import routing_diagnostics
 from hmtc.diffusion import JointDiffusion
@@ -88,7 +89,8 @@ def main() -> None:
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
-    checkpoint = torch.load(args.checkpoint, map_location=args.device, weights_only=True)
+    checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
+    validate_checkpoint(checkpoint)
     model_config = model_config_from_dict(checkpoint["model_config"])
     diffusion_config = DiffusionConfig(**checkpoint["diffusion_config"])
     stats = NormalizationStats(**checkpoint["normalization"])
@@ -109,10 +111,10 @@ def main() -> None:
         collate_fn=collate,
         drop_last=False,
     )
-    model = HMTFModel(model_config).to(args.device)
+    model = HMTFModel(model_config, diffusion_config, stats).to(args.device)
     model.load_state_dict(checkpoint["model_state"])
     model.eval()
-    diffusion = JointDiffusion(diffusion_config, model_config.num_elements)
+    diffusion = JointDiffusion(diffusion_config, model_config.num_elements, stats)
     results: dict[str, dict[str, object]] = {}
 
     with torch.inference_mode():

@@ -12,7 +12,8 @@ import torch
 from torch.utils.data import DataLoader
 
 from hmtc.config import load_config
-from hmtc.data import JsonlCrystalDataset, collate_records, compute_energy_stats
+from hmtc.checkpoint import ARCHITECTURE_ID, CHECKPOINT_FORMAT_VERSION
+from hmtc.data import JsonlCrystalDataset, collate_records, compute_count_prior, compute_normalization_stats
 from hmtc.models import HMTFModel
 from hmtc.training import HMTFTrainer
 
@@ -36,11 +37,17 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.epochs < 1 or args.batch_size < 1:
+        raise ValueError("--epochs and --batch-size must be positive")
     torch.manual_seed(args.seed)
     model_config, diffusion_config, loss_config, _ = load_config(args.config)
     data_path = args.data if args.data is not None else args.data_dir / "train.jsonl"
     dataset = JsonlCrystalDataset(data_path)
-    stats = compute_energy_stats(dataset)
+    stats = compute_normalization_stats(dataset)
+    count_prior = compute_count_prior(dataset, model_config.max_sites)
+    print("count policy: N sampled from the training split prior and fixed throughout diffusion")
+    print("training count prior:", {index + 1: round(float(value), 6)
+                                     for index, value in enumerate(count_prior) if value > 0})
 
     def collate(batch: list) -> object:
         return collate_records(
@@ -57,7 +64,7 @@ def main() -> None:
         collate_fn=collate,
         drop_last=False,
     )
-    model = HMTFModel(model_config).to(args.device)
+    model = HMTFModel(model_config, diffusion_config, stats).to(args.device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=1.0e-4)
     trainer = HMTFTrainer(model, optimizer, diffusion_config, loss_config)
     final_train_loss = 0.0
@@ -159,15 +166,20 @@ def main() -> None:
         for name in tree_names
     )
     print(f"fusion {fusion_text}", flush=True)
+    print(f"geometry image-limit fraction: {final_train_diagnostics.get('geometry.image_limit_fraction', 0.0):.6f}")
+    print("existence is fixed by N; coordinate is sigma-weighted wrapped-normal score MSE")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {
-            "format_version": 1,
+            "format_version": CHECKPOINT_FORMAT_VERSION,
+            "architecture": ARCHITECTURE_ID,
             "model_config": asdict(model_config),
             "diffusion_config": asdict(diffusion_config),
             "loss_config": asdict(loss_config),
             "normalization": asdict(stats),
+            "count_prior": count_prior,
+            "count_prior_source": "train",
             "model_state": model.state_dict(),
             "optimizer_state": optimizer.state_dict(),
             "epochs": args.epochs,

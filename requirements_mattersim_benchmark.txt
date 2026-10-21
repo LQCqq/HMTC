@@ -1,0 +1,5 @@
+# Add to the existing MatterSim environment; do not reinstall Torch.
+lmdb==1.6.2
+cachetools
+huggingface-hub
+smact==4.0.2

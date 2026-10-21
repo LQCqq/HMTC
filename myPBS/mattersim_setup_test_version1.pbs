@@ -1,0 +1,45 @@
+#!/bin/bash
+#PBS -N hmtc_ms_setup_v1
+#PBS -q SPREE
+#PBS -l select=1:ncpus=4:mem=32gb:ngpus=1
+#PBS -l walltime=02:00:00
+#PBS -j oe
+
+set -e
+
+cd /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC
+
+export OMP_NUM_THREADS=4
+export UV_CACHE_DIR=/srv/scratch/ml4matdis/Quanli_Project/.cache/uv
+export UV_PYTHON_INSTALL_DIR=/srv/scratch/ml4matdis/Quanli_Project/.cache/uv/python
+
+if [ ! -x venvs/hmtc/bin/uv ]; then
+    venvs/hmtc/bin/python -m pip install --no-cache-dir uv
+fi
+
+venvs/hmtc/bin/uv python install 3.12
+
+if [ ! -x venvs/mattersim/bin/python ]; then
+    venvs/hmtc/bin/uv venv --python 3.12 venvs/mattersim
+fi
+
+venvs/hmtc/bin/uv pip install \
+    --python venvs/mattersim/bin/python \
+    --no-cache \
+    --torch-backend auto \
+    "mattersim==1.2.5"
+
+source venvs/mattersim/bin/activate
+
+python -m py_compile scripts/relax_mattersim_version1.py
+
+python -u scripts/relax_mattersim_version1.py \
+    --cifs hmtc_outputs/smact_structure \
+    --output-dir hmtc_outputs/mattersim_test_structure \
+    --model MatterSim-v1.0.0-5M.pth \
+    --device cuda \
+    --default-dtype float32 \
+    --fmax 0.02 \
+    --steps 50 \
+    --max-structures 10 \
+    --overwrite

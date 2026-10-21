@@ -37,7 +37,9 @@ class HMTFTrainer:
         self.model = model
         self.optimizer = optimizer
         self.loss_config = loss_config
-        self.diffusion = JointDiffusion(diffusion_config, model.config.num_elements)
+        if diffusion_config != model.diffusion_config:
+            raise ValueError("model and trainer must use the same diffusion configuration")
+        self.diffusion = JointDiffusion(diffusion_config, model.config.num_elements, model.normalization)
         self.energy_evaluator = energy_evaluator
         self.gradient_clip = gradient_clip
 
@@ -48,7 +50,10 @@ class HMTFTrainer:
         collect_diagnostics: bool = False,
     ) -> TrainStepResult:
         self.model.train()
-        time = torch.rand(clean.batch_size, device=clean.energy.device)
+        # Include the actual fully corrupted terminal state during training.
+        time = torch.randint(1, self.diffusion.config.timesteps + 1,
+                             (clean.batch_size,), device=clean.energy.device).to(clean.energy.dtype)
+        time = time / self.diffusion.config.timesteps
         noisy, noise_record = self.diffusion.q_sample(clean, time)
         output = self.model(noisy, time, active_trees=active_trees)
         total, terms = hmtf_loss(
@@ -57,11 +62,14 @@ class HMTFTrainer:
             self.loss_config,
             energy_evaluator=self.energy_evaluator,
             element_mask=noise_record.element_mask,
+            coordinate_target=noise_record.coordinate_score,
+            normalization=self.model.normalization,
         )
         diagnostics = {}
         if collect_diagnostics:
             active = clean.resolved_site_mask() & (clean.existence > 0.5)
             diagnostics = routing_diagnostics(output, active)
+            diagnostics["geometry.image_limit_fraction"] = output.geometry_image_limit_hit.float().mean()
         self.optimizer.zero_grad(set_to_none=True)
         total.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.gradient_clip)

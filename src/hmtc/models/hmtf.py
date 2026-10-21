@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import torch
 from torch import Tensor, nn
 
-from hmtc.config import HMTFConfig
+from hmtc.config import DiffusionConfig, HMTFConfig
+from hmtc.diffusion.schedules import coordinate_sigma
 from hmtc.manifolds.lorentz import expmap0, logmap0
 from hmtc.models.cross_tree import CrossTreeTrace
-from hmtc.models.embeddings import FactorEncoder, FourierCoordinateEmbedding, SinusoidalEmbedding
+from hmtc.models.embeddings import FactorEncoder, SinusoidalEmbedding
 from hmtc.models.encoder_decoder import CrossTreeLatentCore, MultiTreeDecoder, MultiTreeEncoder
+from hmtc.models.geometry import EquivariantCoordinateHead, PeriodicMessageLayer
 from hmtc.types import CrystalState, StructureState
+
+if TYPE_CHECKING:
+    from hmtc.data.schema import NormalizationStats
 
 
 @dataclass
@@ -24,10 +30,15 @@ class HMTFOutput:
     frac_coords: Tensor
     existence_logits: Tensor
     traces: list[CrossTreeTrace]
+    fixed_existence: Tensor | None = None
+    coordinate_score: Tensor | None = None
+    coordinate_sigma: Tensor | None = None
+    noise_time: Tensor | None = None
+    geometry_image_limit_hit: Tensor | None = None
 
     @property
     def existence(self) -> Tensor:
-        return torch.sigmoid(self.existence_logits)
+        return self.fixed_existence if self.fixed_existence is not None else torch.sigmoid(self.existence_logits)
 
     def as_state(self, site_mask: Tensor | None = None) -> CrystalState:
         return CrystalState(
@@ -51,13 +62,24 @@ class HMTFOutput:
 
 
 class HMTFModel(nn.Module):
-    """Jointly denoise energy, lattice, composition, sites, elements, and coordinates."""
+    """Count-conditioned denoiser with scalar trees and a physical vector readout."""
 
     factor_names = ("energy", "lattice", "composition", "size")
 
-    def __init__(self, config: HMTFConfig) -> None:
+    def __init__(
+        self,
+        config: HMTFConfig,
+        diffusion_config: DiffusionConfig | None = None,
+        normalization: NormalizationStats | None = None,
+    ) -> None:
         super().__init__()
+        from hmtc.data.schema import NormalizationStats
+
         self.config = config
+        self.diffusion_config = diffusion_config or DiffusionConfig()
+        self.normalization = normalization or NormalizationStats(0.0, 1.0)
+        self.register_buffer("lattice_mean", torch.tensor(self.normalization.lattice_mean))
+        self.register_buffer("lattice_std", torch.tensor(self.normalization.lattice_std))
         hidden = config.hidden_dim
         self.mask_token = config.num_elements
         self.time_embedding = SinusoidalEmbedding(hidden)
@@ -65,8 +87,10 @@ class HMTFModel(nn.Module):
             nn.Linear(hidden, hidden), nn.SiLU(), nn.Linear(hidden, hidden)
         )
         self.element_embedding = nn.Embedding(config.num_elements + 1, hidden)
-        self.coordinate_embedding = FourierCoordinateEmbedding(num_bands=4)
-        site_input_dim = hidden + self.coordinate_embedding.output_dim + 1 + hidden
+        self.count_embedding = nn.Embedding(config.max_sites + 1, hidden)
+        # Absolute fractional coordinates are deliberately excluded. Geometry
+        # enters only through periodic relative displacements and distances.
+        site_input_dim = hidden + 1 + hidden
         self.site_encoder = nn.Sequential(
             nn.Linear(site_input_dim, hidden * 2),
             nn.SiLU(),
@@ -96,8 +120,11 @@ class HMTFModel(nn.Module):
             nn.Linear(hidden, hidden),
         )
         self.element_head = self._head(hidden * 2, config.num_elements)
-        self.coordinate_head = self._head(hidden * 2, 3)
-        self.existence_head = self._head(hidden * 2, 1)
+        self.physical_refinement = nn.ModuleList([
+            PeriodicMessageLayer(hidden, config.num_rbf, config.rbf_cutoff)
+            for _ in range(config.geometry_refinement_layers)
+        ])
+        self.coordinate_head = EquivariantCoordinateHead(hidden * 2, config.num_rbf, config.rbf_cutoff)
 
     @staticmethod
     def _head(input_dim: int, output_dim: int) -> nn.Module:
@@ -109,13 +136,10 @@ class HMTFModel(nn.Module):
         )
 
     def _encode_factors(self, state: CrystalState, time_tangent: Tensor) -> Tensor:
-        site_mask = state.resolved_site_mask().to(state.existence.dtype)
-        size = (state.existence * site_mask).sum(dim=1, keepdim=True) / site_mask.sum(
-            dim=1, keepdim=True
-        ).clamp_min(1.0)
+        size = state.num_atoms.to(state.energy.dtype)[:, None] / self.config.max_sites
         values = {
             "energy": state.energy,
-            "lattice": state.lattice,
+            "lattice": (state.lattice - self.lattice_mean) / self.lattice_std,
             "composition": state.composition,
             "size": size,
         }
@@ -137,20 +161,21 @@ class HMTFModel(nn.Module):
             time = time.squeeze(-1)
         if time.shape != (state.batch_size,):
             raise ValueError("time must have shape [batch] or [batch, 1]")
+        active = state.physical_site_mask()
         time_tangent = self.time_projection(self.time_embedding(time))
-        coordinate_features = self.coordinate_embedding(state.frac_coords)
-        element_features = self.element_embedding(state.elements)
-        site_time = time_tangent[:, None, :].expand(-1, state.max_sites, -1)
+        count_tangent = self.count_embedding(state.num_atoms)
+        element_features = self.element_embedding(torch.where(active, state.elements, torch.zeros_like(state.elements)))
+        site_time = (time_tangent + count_tangent)[:, None, :].expand(-1, state.max_sites, -1)
         site_input = torch.cat(
-            (element_features, coordinate_features, state.existence.unsqueeze(-1), site_time),
+            (element_features, active.to(state.energy.dtype).unsqueeze(-1), site_time),
             dim=-1,
         )
         sites = expmap0(self.site_encoder(site_input))
         factors = self._encode_factors(state, time_tangent)
         workspace_tangent = self.global_tokens[None].expand(state.batch_size, -1, -1)
-        workspace_tangent = workspace_tangent + time_tangent[:, None, :]
+        workspace_tangent = workspace_tangent + (time_tangent + count_tangent)[:, None, :]
         workspace = expmap0(workspace_tangent)
-        site_mask = state.resolved_site_mask()
+        site_mask = active
         encoded = self.encoder(
             sites=sites,
             factors=factors,
@@ -163,6 +188,9 @@ class HMTFModel(nn.Module):
         )
         latent = self.latent_core(encoded, workspace, factors)
         sites, decoder_trace = self.decoder(encoded, latent, self.encoder.trees)
+        for layer in self.physical_refinement:
+            sites = layer(sites, state.frac_coords, state.lattice, state.existence,
+                          active, encoded.graph)
         workspace, factors = latent.workspace, latent.factors
         traces = [CrossTreeTrace(**decoder_trace.__dict__)]
 
@@ -175,8 +203,8 @@ class HMTFModel(nn.Module):
         lattice_context = torch.cat((factor_tangent[:, 1], global_tangent), dim=-1)
         composition_context = torch.cat((factor_tangent[:, 2], global_tangent), dim=-1)
 
-        energy = state.energy + self.energy_head(energy_context)
-        lattice = state.lattice + self.lattice_head(lattice_context)
+        energy = self.energy_head(energy_context)
+        lattice = self.lattice_head(lattice_context) * self.lattice_std + self.lattice_mean
         chemical_root = latent.roots.get("chemical")
         chemical_tangent = (
             global_tangent if chemical_root is None else logmap0(chemical_root)
@@ -188,12 +216,19 @@ class HMTFModel(nn.Module):
             (site_tangent + element_condition[:, None, :], global_for_sites), dim=-1
         )
         element_logits = self.element_head(element_site_readout)
-        coordinate_delta = 0.5 * torch.tanh(self.coordinate_head(site_readout))
-        frac_coords = torch.remainder(state.frac_coords + coordinate_delta, 1.0)
-        existence_logits = self.existence_head(site_readout).squeeze(-1)
-        existence_logits = existence_logits.masked_fill(~site_mask, -20.0)
-        predicted_size = (torch.sigmoid(existence_logits) * site_mask).sum(dim=1, keepdim=True)
-        predicted_size = predicted_size / site_mask.sum(dim=1, keepdim=True).clamp_min(1)
+        normalized_noise = self.coordinate_head(site_readout, encoded.graph, state.lattice)
+        sigma = coordinate_sigma(time, self.diffusion_config.coordinate_sigma_min,
+                                 self.diffusion_config.coordinate_sigma_max)
+        score = -normalized_noise / sigma[:, None, None].clamp_min(1.0e-8)
+        score = torch.where((sigma > 0)[:, None, None] & active[..., None], score,
+                            torch.zeros_like(score))
+        # A local Tweedie estimate is exposed for low-noise geometry penalties.
+        # Sampling uses score with the matched VE predictor, not this estimate
+        # as an arbitrary interpolation target.
+        frac_coords = torch.remainder(state.frac_coords + sigma[:, None, None].square() * score, 1.0)
+        frac_coords = torch.where(active[..., None], frac_coords, torch.zeros_like(frac_coords))
+        existence_logits = torch.where(active, energy.new_tensor(20.0), energy.new_tensor(-20.0))
+        predicted_size = state.num_atoms.to(energy.dtype)[:, None] / self.config.max_sites
         composition = torch.softmax(self.composition_head(composition_context), dim=-1)
         composition = composition * predicted_size
         return HMTFOutput(
@@ -204,4 +239,9 @@ class HMTFModel(nn.Module):
             frac_coords=frac_coords,
             existence_logits=existence_logits,
             traces=traces,
+            fixed_existence=active.to(energy.dtype),
+            coordinate_score=score,
+            coordinate_sigma=sigma,
+            noise_time=time,
+            geometry_image_limit_hit=encoded.graph.image_limit_hit,
         )

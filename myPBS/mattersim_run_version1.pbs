@@ -1,0 +1,33 @@
+#!/bin/bash
+
+#PBS -N MatterSim
+
+#PBS -l select=1:ncpus=8:mem=46gb:ngpus=1
+
+#PBS -l walltime=12:00:00
+
+#PBS -M z5561341@ad.unsw.edu.au
+
+#PBS -m ae
+
+#PBS -j oe
+
+#PBS -o /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC/logs
+
+set -e
+
+cd /srv/scratch/ml4matdis/Quanli_Project/EGS/HMTC
+
+export OMP_NUM_THREADS=4
+
+module load python/3.13.2
+source venvs/mattersim/bin/activate
+
+python -u scripts/relax_mattersim_version1.py \
+    --cifs hmtc_outputs/mace_structure \
+    --output-dir hmtc_outputs/mattersim_structure \
+    --model MatterSim-v1.0.0-5M.pth \
+    --device cuda \
+    --default-dtype float32 \
+    --fmax 0.02 \
+    --steps 50

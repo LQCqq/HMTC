@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from hmtc.config import LossConfig
+from hmtc.data.schema import NormalizationStats
 from hmtc.element_properties import COVALENT_RADII_ANGSTROM
 from hmtc.models.geometry import pairwise_periodic_geometry
 from hmtc.models.hmtf import HMTFOutput
@@ -191,16 +192,22 @@ def hmtf_loss(
     config: LossConfig,
     energy_evaluator: Callable[[StructureState], Tensor] | None = None,
     element_mask: Tensor | None = None,
+    coordinate_target: Tensor | None = None,
+    normalization: NormalizationStats | None = None,
 ) -> tuple[Tensor, dict[str, Tensor]]:
     site_mask = target.resolved_site_mask()
     active = site_mask & (target.existence > 0.5)
     energy = F.smooth_l1_loss(output.energy, target.energy)
-    lattice = F.smooth_l1_loss(output.lattice, target.lattice)
+    stats = normalization or NormalizationStats(0.0, 1.0)
+    lattice = F.smooth_l1_loss(stats.normalize_lattice(output.lattice), stats.normalize_lattice(target.lattice))
+    geometry_active = active
+    if output.noise_time is not None:
+        geometry_active = active & (output.noise_time <= config.geometry_loss_max_time)[:, None]
     distance = minimum_distance_penalty(
         output.element_logits,
         output.frac_coords,
         output.lattice,
-        active,
+        geometry_active,
         offset=config.min_distance_offset,
         scaling_factor=config.min_distance_scaling_factor,
     )
@@ -221,12 +228,13 @@ def hmtf_loss(
         site_mask,
         target.max_sites,
     )
-    coordinate_raw = periodic_squared_error(output.frac_coords, target.frac_coords).sum(dim=-1)
+    if coordinate_target is None or output.coordinate_score is None or output.coordinate_sigma is None:
+        raise ValueError("v4 coordinate loss requires the wrapped-normal score target from JointDiffusion")
+    # sigma^2-weighted DSM; this is normalized score error, not x0-coordinate MSE.
+    score_error = (output.coordinate_score - coordinate_target) * output.coordinate_sigma[:, None, None]
+    coordinate_raw = score_error.square().mean(dim=-1)
     coordinate = (coordinate_raw * active).sum() / active.sum().clamp_min(1)
-    existence_raw = F.binary_cross_entropy_with_logits(
-        output.existence_logits, target.existence, reduction="none"
-    )
-    existence = (existence_raw * site_mask).sum() / site_mask.sum().clamp_min(1)
+    existence = output.energy.new_zeros(())
     site_composition = (
         torch.einsum("bk,bke->be", output.existence, torch.softmax(output.element_logits, dim=-1))
         / target.max_sites

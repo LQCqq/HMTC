@@ -28,9 +28,9 @@ class CrystalState:
     """Joint state diffused by HMTF.
 
     Element indices use ``0 .. num_elements - 1`` for real species and
-    ``mask_token == num_elements`` only in noisy states.  ``site_mask`` marks
-    allocated computational slots; ``existence`` is the generated physical
-    occupancy and is deliberately a separate factor.
+    ``mask_token == num_elements`` only in noisy states. In v4, ``existence``
+    is a fixed binary count condition and ``site_mask`` excludes padding.
+    Neither factor is learned or corrupted during the diffusion trajectory.
     """
 
     energy: Tensor
@@ -54,6 +54,14 @@ class CrystalState:
             return torch.ones_like(self.existence, dtype=torch.bool)
         return self.site_mask.bool()
 
+    def physical_site_mask(self) -> Tensor:
+        """Fixed physical sites; allocated padding slots never become atoms."""
+        return self.resolved_site_mask() & self.existence.bool()
+
+    @property
+    def num_atoms(self) -> Tensor:
+        return self.physical_site_mask().sum(dim=1)
+
     def validate(self, num_elements: int, allow_mask_token: bool = False) -> None:
         batch, sites = self.elements.shape
         expected = {
@@ -70,6 +78,10 @@ class CrystalState:
                 )
         if self.site_mask is not None and tuple(self.site_mask.shape) != (batch, sites):
             raise ValueError("site_mask must have shape [batch, sites]")
+        if bool(((self.existence != 0) & (self.existence != 1)).any()):
+            raise ValueError("v4 existence is a fixed binary count condition, not a continuous variable")
+        if bool((self.num_atoms < 1).any()):
+            raise ValueError("every crystal must contain at least one physical site")
         upper = num_elements if allow_mask_token else num_elements - 1
         if bool((self.elements < 0).any()) or bool((self.elements > upper).any()):
             raise ValueError(f"element indices must lie in [0, {upper}]")
@@ -133,3 +145,5 @@ class NoiseRecord:
     coordinates: Tensor
     element_mask: Tensor
     existence_mask: Tensor
+    coordinate_score: Tensor | None = None
+    coordinate_sigma: Tensor | None = None
